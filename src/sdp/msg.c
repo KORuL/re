@@ -501,7 +501,7 @@ int sdp_encode(struct mbuf **mbp, struct sdp_session *sess, bool offer)
 	err  = mbuf_printf(mb, "v=%u\r\n", SDP_VERSION);
 	err |= mbuf_printf(mb, "o=- %u %u IN IP%d %j\r\n",
 			   sess->id, sess->ver++, ipver, &sess->laddr);
-	err |= mbuf_write_str(mb, "s=-\r\n");
+//	err |= mbuf_write_str(mb, "s=-\r\n");
 	err |= mbuf_printf(mb, "c=IN IP%d %j\r\n", ipver, &sess->laddr);
 
 	for (i=SDP_BANDWIDTH_MIN; i<SDP_BANDWIDTH_MAX; i++) {
