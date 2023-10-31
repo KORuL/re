@@ -925,8 +925,8 @@ int sip_drequestf(struct sip_request **reqp, struct sip *sip, bool stateful,
 
 	err |= sip_dialog_encode(mb, dlg, cseq, met);
 
-	if (sip->software)
-		err |= mbuf_printf(mb, "User-Agent: %s\r\n", sip->software);
+//	if (sip->software)
+//		err |= mbuf_printf(mb, "User-Agent: %s\r\n", sip->software);
 
 	if (err)
 		goto out;
