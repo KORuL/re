@@ -90,8 +90,8 @@ static int request_copy(struct mbuf **mbp, struct sip_ctrans *ct,
 	err |= mbuf_printf(mb, "From: %r\r\n", &ct->req->from.val);
 	err |= mbuf_printf(mb, "Call-ID: %r\r\n", &ct->req->callid);
 	err |= mbuf_printf(mb, "CSeq: %u %s\r\n", ct->req->cseq.num, met);
-	if (ct->sip->software)
-		err |= mbuf_printf(mb, "User-Agent: %s\r\n",ct->sip->software);
+//	if (ct->sip->software)
+//		err |= mbuf_printf(mb, "User-Agent: %s\r\n",ct->sip->software);
 	err |= mbuf_write_str(mb, "Content-Length: 0\r\n\r\n");
 
 	mb->pos = 0;
