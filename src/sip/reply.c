@@ -100,8 +100,8 @@ static int vreplyf(struct sip_strans **stp, struct mbuf **mbp, bool trans,
 		}
 	}
 
-	if (sip->software)
-		err |= mbuf_printf(mb, "Server: %s\r\n", sip->software);
+//	if (sip->software)
+//		err |= mbuf_printf(mb, "Server: %s\r\n", sip->software);
 
 	if (fmt)
 		err |= mbuf_vprintf(mb, fmt, ap);
