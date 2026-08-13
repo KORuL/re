@@ -303,6 +303,7 @@ static const struct test tests_integration[] = {
 	TEST(test_sipreg_udp),
 	TEST(test_tmr_jiffies),
 	TEST(test_tmr_jiffies_usec),
+	TEST(test_tmr_thread_ownership),
 	TEST(test_turn_thread),
 	TEST(test_thread_cnd_timedwait),
 	TEST(test_cplusplus),

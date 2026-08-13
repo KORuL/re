@@ -362,6 +362,7 @@ int test_thread_cnd_timedwait(void);
 int test_thread_tss(void);
 int test_tmr_jiffies(void);
 int test_tmr_jiffies_usec(void);
+int test_tmr_thread_ownership(void);
 int test_try_into(void);
 int test_turn(void);
 int test_turn_tcp(void);

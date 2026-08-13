@@ -41,6 +41,35 @@ struct tmrl {
 };
 
 
+/*
+ * A timer can migrate between timer lists owned by different threads.  The
+ * per-list locks protect list contents, but cannot by themselves make the
+ * transition from the old list lock to the new one atomic.  Serialize timer
+ * ownership changes so llock always names a live lock protecting tmr->le.
+ */
+static once_flag ownership_once = ONCE_FLAG_INIT;
+static mtx_t ownership_lock;
+
+
+static void ownership_lock_init(void)
+{
+	(void)mtx_init(&ownership_lock, mtx_plain);
+}
+
+
+static void ownership_enter(void)
+{
+	call_once(&ownership_once, ownership_lock_init);
+	mtx_lock(&ownership_lock);
+}
+
+
+static void ownership_leave(void)
+{
+	mtx_unlock(&ownership_lock);
+}
+
+
 static void tmrl_destructor(void *arg)
 {
 	struct tmrl *tmrl = arg;
@@ -49,17 +78,22 @@ static void tmrl_destructor(void *arg)
 	if (!tmrl->lock)
 		return;
 
+	ownership_enter();
 	mtx_lock(tmrl->lock);
 	LIST_FOREACH(&tmrl->list, le) {
 		struct tmr *tmr = le->data;
 		if (!tmr)
 			continue;
+		tmr->th = NULL;
+		tmr->arg = NULL;
 		re_atomic_rls_set(&tmr->llock, (uintptr_t)NULL);
 	}
 	list_clear(&tmrl->list);
 	mtx_unlock(tmrl->lock);
 
 	mem_deref(tmrl->lock);
+	tmrl->lock = NULL;
+	ownership_leave();
 }
 
 
@@ -159,11 +193,13 @@ void tmr_poll(struct tmrl *tmrl)
 		tmr_h *th;
 		void *th_arg;
 
+		ownership_enter();
 		mtx_lock(tmrl->lock);
 		tmr = list_ledata(tmrl->list.head);
 
 		if (!tmr || (tmr->jfs > jfs)) {
 			mtx_unlock(tmrl->lock);
+			ownership_leave();
 			break;
 		}
 
@@ -171,10 +207,12 @@ void tmr_poll(struct tmrl *tmrl)
 		th_arg = tmr->arg;
 
 		tmr->th = NULL;
+		tmr->arg = NULL;
 
 		list_unlink(&tmr->le);
 		re_atomic_rls_set(&tmr->llock, (uintptr_t)NULL);
 		mtx_unlock(tmrl->lock);
+		ownership_leave();
 
 		if (!th)
 			continue;
@@ -417,6 +455,8 @@ static void tmr_startcont_dbg(struct tmr *tmr, uint64_t delay, bool syncnow,
 	if (!tmr || !tmrl)
 		return;
 
+	ownership_enter();
+
 	/* use old list lock for unlinking */
 	uintptr_t lock_t = (uintptr_t)re_atomic_acq(&tmr->llock);
 	mtx_t *lock = (mtx_t *)lock_t;
@@ -425,8 +465,11 @@ static void tmr_startcont_dbg(struct tmr *tmr, uint64_t delay, bool syncnow,
 
 	mtx_lock(lock);
 
-	if (tmr->th)
+	if (tmr->th) {
 		list_unlink(&tmr->le);
+		tmr->th = NULL;
+		tmr->arg = NULL;
+	}
 
 	mtx_unlock(lock);
 
@@ -434,6 +477,7 @@ static void tmr_startcont_dbg(struct tmr *tmr, uint64_t delay, bool syncnow,
 
 	if (!th) {
 		re_atomic_rls_set(&tmr->llock, (uintptr_t)NULL);
+		ownership_leave();
 		return;
 	}
 
@@ -471,6 +515,7 @@ static void tmr_startcont_dbg(struct tmr *tmr, uint64_t delay, bool syncnow,
 	}
 
 	mtx_unlock(lock);
+	ownership_leave();
 }
 
 
