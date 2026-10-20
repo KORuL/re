@@ -20,6 +20,31 @@
 #include <re_turn.h>
 #include "turnc.h"
 
+/*
+ * Rubetek diagnostic probe for issue f6ad62ba. Android Studio links a strong
+ * implementation; plain libre/baresip builds remain unchanged. Never send a
+ * native pointer to Crashlytics: the Android hook maps it to a local ID.
+ */
+#if defined(__ANDROID__) && (defined(__GNUC__) || defined(__clang__))
+extern void rubetek_turn_trace(const char *phase, const void *owner,
+                               int error, unsigned int scode)
+    __attribute__((weak));
+#endif
+
+static void turn_trace(const char *phase, const void *owner,
+                       int error, unsigned int scode)
+{
+#if defined(__ANDROID__) && (defined(__GNUC__) || defined(__clang__))
+    if (rubetek_turn_trace)
+        rubetek_turn_trace(phase, owner, error, scode);
+#else
+    (void)phase;
+    (void)owner;
+    (void)error;
+    (void)scode;
+#endif
+}
+
 
 #define DEBUG_MODULE "turnc"
 #define DEBUG_LEVEL 5
@@ -49,6 +74,8 @@ static void destructor(void *arg)
 {
 	struct turnc *turnc = arg;
 
+	turn_trace("turn_destroy_enter", turnc, 0, 0);
+
 	if (turnc->allocated)
 		(void)refresh_request(turnc, 0, true, NULL, NULL);
 
@@ -66,6 +93,7 @@ static void destructor(void *arg)
 	mem_deref(turnc->uh);
 	mem_deref(turnc->sock);
 	mem_deref(turnc->lock);
+	turn_trace("turn_destroy_exit", turnc, 0, 0);
 }
 
 
@@ -74,10 +102,12 @@ static void timeout(void *arg)
 	struct turnc *turnc = arg;
 	int err;
 
+	turn_trace("turn_refresh_timer", turnc, 0, 0);
 	err = refresh_request(turnc, turnc->lifetime, true,
 			      refresh_resp_handler, turnc);
 	if (err)
 		turnc->th(err, 0, NULL, NULL, NULL, NULL, turnc->arg);
+	turn_trace("turn_refresh_timer_return", turnc, err, 0);
 }
 
 
@@ -185,6 +215,8 @@ static void refresh_resp_handler(int err, uint16_t scode, const char *reason,
 	struct turnc *turnc = arg;
 	struct stun_attr *ltm;
 
+	turn_trace("turn_refresh_cb_enter", turnc, err, scode);
+
 	if (err || turnc_request_loops(&turnc->ls, scode))
 		goto out;
 
@@ -215,7 +247,10 @@ static void refresh_resp_handler(int err, uint16_t scode, const char *reason,
 	}
 
  out:
+	turn_trace("turn_refresh_cb_dispatch", turnc, err, scode);
 	turnc->th(err, scode, reason, NULL, NULL, msg, turnc->arg);
+	/* The application callback may destroy turnc: never dereference it here. */
+	turn_trace("turn_refresh_cb_return", turnc, err, scode);
 }
 
 
@@ -227,6 +262,7 @@ static int refresh_request(struct turnc *t, uint32_t lifetime, bool reset_ls,
 
 	if (reset_ls)
 		turnc_loopstate_reset(&t->ls);
+	turn_trace("turn_refresh_request", t, 0, 0);
 
 	if (t->ct)
 		t->ct = mem_deref(t->ct);
@@ -464,8 +500,10 @@ int turnc_alloc(struct turnc **turncp, const struct stun_conf *conf, int proto,
  out:
 	if (err)
 		mem_deref(turnc);
-	else
+	else {
 		*turncp = turnc;
+		turn_trace("turn_allocated", turnc, 0, 0);
+	}
 
 	return err;
 }

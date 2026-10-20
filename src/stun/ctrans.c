@@ -19,6 +19,31 @@
 #include <re_stun.h>
 #include "stun.h"
 
+/*
+ * Rubetek diagnostic probe for issue f6ad62ba. Android Studio links a strong
+ * implementation; plain libre/baresip builds remain unchanged. Never send a
+ * native pointer to Crashlytics: the Android hook maps it to a local ID.
+ */
+#if defined(__ANDROID__) && (defined(__GNUC__) || defined(__clang__))
+extern void rubetek_turn_trace(const char *phase, const void *owner,
+                               int error, unsigned int scode)
+    __attribute__((weak));
+#endif
+
+static void stun_turn_trace(const char *phase, const void *owner,
+                       int error, unsigned int scode)
+{
+#if defined(__ANDROID__) && (defined(__GNUC__) || defined(__clang__))
+    if (rubetek_turn_trace)
+        rubetek_turn_trace(phase, owner, error, scode);
+#else
+    (void)phase;
+    (void)owner;
+    (void)error;
+    (void)scode;
+#endif
+}
+
 
 struct stun_ctrans {
 	struct le le;
@@ -41,12 +66,24 @@ struct stun_ctrans {
 };
 
 
+static void trace_if_turn(const struct stun_ctrans *ct, const char *phase,
+                          int err, uint16_t scode)
+{
+    if (ct && ct->arg &&
+        (ct->met == STUN_METHOD_ALLOCATE || ct->met == STUN_METHOD_REFRESH))
+        stun_turn_trace(phase, ct->arg, err, scode);
+}
+
+
 static void completed(struct stun_ctrans *ct, int err, uint16_t scode,
 		      const char *reason, const struct stun_msg *msg)
 {
 	stun_resp_h *resph = ct->resph;
 	void *arg = ct->arg;
+	const bool is_turn = resph && arg &&
+		(ct->met == STUN_METHOD_ALLOCATE || ct->met == STUN_METHOD_REFRESH);
 
+	trace_if_turn(ct, "stun_complete_enter", err, scode);
 	list_unlink(&ct->le);
 	tmr_cancel(&ct->tmr);
 
@@ -60,8 +97,14 @@ static void completed(struct stun_ctrans *ct, int err, uint16_t scode,
 	/* must be destroyed before calling handler */
 	mem_deref(ct);
 
-	if (resph)
+	if (resph) {
+		/* The owner may be freed from resph: only pass the opaque address. */
+		if (is_turn)
+			stun_turn_trace("stun_callback_dispatch", arg, err, scode);
 		resph(err, scode, reason, msg, arg);
+		if (is_turn)
+			stun_turn_trace("stun_callback_return", arg, err, scode);
+	}
 }
 
 
@@ -69,6 +112,7 @@ static void destructor(void *arg)
 {
 	struct stun_ctrans *ct = arg;
 
+	trace_if_turn(ct, "stun_destroy", 0, 0);
 	list_unlink(&ct->le);
 	tmr_cancel(&ct->tmr);
 	mem_deref(ct->key);
@@ -81,6 +125,7 @@ static void timeout_handler(void *arg)
 {
 	struct stun_ctrans *ct = arg;
 	const struct stun_conf *cfg = stun_conf(ct->stun);
+	trace_if_turn(ct, "stun_timeout", 0, 0);
 	int err = ETIMEDOUT;
 
 	if (ct->txc++ >= cfg->rc)
@@ -324,6 +369,7 @@ int stun_ctrans_request(struct stun_ctrans **ctp, struct stun *stun, int proto,
 
 		ct->resph = resph;
 		ct->arg   = arg;
+		trace_if_turn(ct, "stun_request_start", 0, 0);
 	}
 	else
 		mem_deref(ct);
